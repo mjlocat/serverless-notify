@@ -107,3 +107,8 @@ app reconnects and back-fills via `GET /message?since=…`.
   max duration**. The app auto-reconnects and re-fetches missed messages, so nothing is
   lost, but there can be a brief delivery delay across a reconnect. True push (FCM /
   UnifiedPush) would remove this but requires a modified app — deferred to the backlog.
+
+## License
+
+[MIT](LICENSE). Gotify itself is also MIT-licensed; this project reimplements its API
+and does not include Gotify source.
