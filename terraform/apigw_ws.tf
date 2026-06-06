@@ -35,4 +35,9 @@ resource "aws_apigatewayv2_stage" "ws" {
   api_id      = aws_apigatewayv2_api.ws.id
   name        = var.ws_stage
   auto_deploy = true
+
+  default_route_settings {
+    throttling_rate_limit  = var.throttle_rate_limit
+    throttling_burst_limit = var.throttle_burst_limit
+  }
 }

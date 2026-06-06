@@ -23,4 +23,9 @@ resource "aws_apigatewayv2_stage" "http" {
   api_id      = aws_apigatewayv2_api.http.id
   name        = "$default"
   auto_deploy = true
+
+  default_route_settings {
+    throttling_rate_limit  = var.throttle_rate_limit
+    throttling_burst_limit = var.throttle_burst_limit
+  }
 }
