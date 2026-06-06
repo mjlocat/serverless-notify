@@ -25,13 +25,14 @@ resource "aws_lambda_function" "api" {
 
   environment {
     variables = {
-      TABLE_NAME       = aws_dynamodb_table.notify.name
-      BYTOKEN_INDEX    = "byToken"
-      BYAPP_INDEX      = "byApp"
-      WS_MGMT_ENDPOINT = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${var.region}.amazonaws.com/${var.ws_stage}"
-      BASE_URL         = "https://${var.domain_name}"
-      SSM_AUTH_PARAM   = aws_ssm_parameter.auth.name
-      MESSAGE_TTL_DAYS = tostring(var.message_ttl_days)
+      TABLE_NAME          = aws_dynamodb_table.notify.name
+      BYTOKEN_INDEX       = "byToken"
+      BYAPP_INDEX         = "byApp"
+      WS_MGMT_ENDPOINT    = "https://${aws_apigatewayv2_api.ws.id}.execute-api.${var.region}.amazonaws.com/${var.ws_stage}"
+      BASE_URL            = "https://${var.domain_name}"
+      SSM_AUTH_PARAM      = aws_ssm_parameter.auth.name
+      MESSAGE_TTL_DAYS    = tostring(var.message_ttl_days)
+      CORS_ALLOWED_ORIGIN = var.cors_allowed_origin
     }
   }
 }

@@ -43,10 +43,11 @@ type credentials struct {
 }
 
 type server struct {
-	store   *store.Store
-	wsAPI   *apigatewaymanagementapi.Client
-	creds   credentials
-	baseURL string
+	store      *store.Store
+	wsAPI      *apigatewaymanagementapi.Client
+	creds      credentials
+	baseURL    string
+	corsOrigin string
 }
 
 func main() {
@@ -79,7 +80,13 @@ func main() {
 		log.Fatalf("load credentials: %v", err)
 	}
 
-	s := &server{store: st, wsAPI: wsAPI, creds: creds, baseURL: strings.TrimRight(os.Getenv("BASE_URL"), "/")}
+	s := &server{
+		store:      st,
+		wsAPI:      wsAPI,
+		creds:      creds,
+		baseURL:    strings.TrimRight(os.Getenv("BASE_URL"), "/"),
+		corsOrigin: os.Getenv("CORS_ALLOWED_ORIGIN"),
+	}
 	lambda.Start(s.handle)
 }
 
@@ -106,7 +113,7 @@ func (s *server) handle(ctx context.Context, req events.APIGatewayV2HTTPRequest)
 	segs := splitPath(req.RawPath)
 
 	if method == "OPTIONS" {
-		return resp(204, nil), nil
+		return s.resp(204, nil), nil
 	}
 
 	switch {
@@ -237,7 +244,7 @@ func (s *server) deleteMessage(ctx context.Context, req events.APIGatewayV2HTTPR
 	if err := s.store.DeleteMessage(ctx, id); err != nil {
 		return s.serverError(err), nil
 	}
-	return resp(200, nil), nil
+	return s.resp(200, nil), nil
 }
 
 func (s *server) deleteAllMessages(ctx context.Context, req events.APIGatewayV2HTTPRequest) (events.APIGatewayV2HTTPResponse, error) {
@@ -247,7 +254,7 @@ func (s *server) deleteAllMessages(ctx context.Context, req events.APIGatewayV2H
 	if err := s.store.DeleteAllMessages(ctx); err != nil {
 		return s.serverError(err), nil
 	}
-	return resp(200, nil), nil
+	return s.resp(200, nil), nil
 }
 
 func (s *server) deleteAppMessages(ctx context.Context, req events.APIGatewayV2HTTPRequest, idStr string) (events.APIGatewayV2HTTPResponse, error) {
@@ -261,7 +268,7 @@ func (s *server) deleteAppMessages(ctx context.Context, req events.APIGatewayV2H
 	if err := s.store.DeleteAppMessages(ctx, appID); err != nil {
 		return s.serverError(err), nil
 	}
-	return resp(200, nil), nil
+	return s.resp(200, nil), nil
 }
 
 // --- application handlers ------------------------------------------------
@@ -348,7 +355,7 @@ func (s *server) deleteApplication(ctx context.Context, req events.APIGatewayV2H
 	if err := s.store.DeleteApplication(ctx, id); err != nil {
 		return s.serverError(err), nil
 	}
-	return resp(200, nil), nil
+	return s.resp(200, nil), nil
 }
 
 // uploadAppImage is a minimal stub: app icons are optional for the Android app
@@ -444,7 +451,7 @@ func (s *server) deleteClient(ctx context.Context, req events.APIGatewayV2HTTPRe
 	if err := s.store.DeleteClient(ctx, id); err != nil {
 		return s.serverError(err), nil
 	}
-	return resp(200, nil), nil
+	return s.resp(200, nil), nil
 }
 
 // --- delivery ------------------------------------------------------------
@@ -490,7 +497,7 @@ func (s *server) broadcast(ctx context.Context, msg gotify.Message) {
 // authApp authorizes a sender via an application token and returns its app id.
 func (s *server) authApp(ctx context.Context, req events.APIGatewayV2HTTPRequest) (int64, bool) {
 	token := auth.ExtractToken(req.Headers, req.QueryStringParameters)
-	if token == "" || token[0] != 'A' {
+	if !gotify.ValidTokenFormat(token, 'A') {
 		return 0, false
 	}
 	app, ok, err := s.store.GetApplicationByToken(ctx, token)
@@ -504,7 +511,7 @@ func (s *server) authApp(ctx context.Context, req events.APIGatewayV2HTTPRequest
 // authClient authorizes a management/receiver request via a client token or the
 // single-user basic-auth credentials.
 func (s *server) authClient(ctx context.Context, req events.APIGatewayV2HTTPRequest) bool {
-	if token := auth.ExtractToken(req.Headers, req.QueryStringParameters); token != "" && token[0] == 'C' {
+	if token := auth.ExtractToken(req.Headers, req.QueryStringParameters); gotify.ValidTokenFormat(token, 'C') {
 		_, ok, err := s.store.GetClientByToken(ctx, token)
 		if err != nil {
 			log.Printf("authClient: %v", err)
@@ -640,20 +647,25 @@ func splitPath(raw string) []string {
 
 // --- responses -----------------------------------------------------------
 
-func corsHeaders(contentType string) map[string]string {
-	h := map[string]string{
-		"Access-Control-Allow-Origin":  "*",
-		"Access-Control-Allow-Methods": "GET, POST, PUT, DELETE, OPTIONS",
-		"Access-Control-Allow-Headers": "Authorization, Content-Type, X-Gotify-Key",
-	}
+// corsHeaders emits CORS headers only when an allowed origin is explicitly
+// configured (CORS_ALLOWED_ORIGIN) — never "*". Native clients (Android, curl)
+// don't need CORS at all, so the default is no cross-origin access.
+func (s *server) corsHeaders(contentType string) map[string]string {
+	h := map[string]string{}
 	if contentType != "" {
 		h["Content-Type"] = contentType
+	}
+	if s.corsOrigin != "" {
+		h["Access-Control-Allow-Origin"] = s.corsOrigin
+		h["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS"
+		h["Access-Control-Allow-Headers"] = "Authorization, Content-Type, X-Gotify-Key"
+		h["Vary"] = "Origin"
 	}
 	return h
 }
 
-func resp(status int, body []byte) events.APIGatewayV2HTTPResponse {
-	return events.APIGatewayV2HTTPResponse{StatusCode: status, Headers: corsHeaders(""), Body: string(body)}
+func (s *server) resp(status int, body []byte) events.APIGatewayV2HTTPResponse {
+	return events.APIGatewayV2HTTPResponse{StatusCode: status, Headers: s.corsHeaders(""), Body: string(body)}
 }
 
 func (s *server) json(status int, v interface{}) events.APIGatewayV2HTTPResponse {
@@ -661,7 +673,7 @@ func (s *server) json(status int, v interface{}) events.APIGatewayV2HTTPResponse
 	if err != nil {
 		return s.serverError(err)
 	}
-	return events.APIGatewayV2HTTPResponse{StatusCode: status, Headers: corsHeaders("application/json"), Body: string(b)}
+	return events.APIGatewayV2HTTPResponse{StatusCode: status, Headers: s.corsHeaders("application/json"), Body: string(b)}
 }
 
 func (s *server) error(status int, errStr, desc string) events.APIGatewayV2HTTPResponse {

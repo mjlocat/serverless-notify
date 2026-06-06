@@ -34,6 +34,24 @@ variable "message_ttl_days" {
   default     = 0
 }
 
+variable "throttle_rate_limit" {
+  description = "API Gateway steady-state requests/sec per stage (cost/DoS guardrail)."
+  type        = number
+  default     = 20
+}
+
+variable "throttle_burst_limit" {
+  description = "API Gateway burst request limit per stage."
+  type        = number
+  default     = 40
+}
+
+variable "cors_allowed_origin" {
+  description = "Exact browser origin allowed via CORS (empty = no CORS; native clients don't need it)."
+  type        = string
+  default     = ""
+}
+
 variable "basic_auth_username" {
   description = "Single-user login name (used by the Android app to register a client)."
   type        = string

@@ -14,6 +14,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
 
+	"github.com/mjlocat/serverless-notify/internal/gotify"
 	"github.com/mjlocat/serverless-notify/internal/store"
 )
 
@@ -41,7 +42,7 @@ func (h *handler) handle(ctx context.Context, req events.APIGatewayWebsocketProx
 	switch req.RequestContext.RouteKey {
 	case "$connect":
 		token := req.QueryStringParameters["token"]
-		if token == "" || token[0] != 'C' {
+		if !gotify.ValidTokenFormat(token, 'C') {
 			return events.APIGatewayProxyResponse{StatusCode: 401}, nil
 		}
 		client, ok, err := h.store.GetClientByToken(ctx, token)
