@@ -1,0 +1,10 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+basic_auth_username = "admin"
+basic_auth_password = "change-me-to-something-strong"
+
+# Defaults already match your setup; uncomment to override.
+# region           = "us-east-1"
+# domain_name      = "notify.example.com"
+# hosted_zone_name = "example.com"
+# message_ttl_days = 0

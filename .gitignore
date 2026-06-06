@@ -1,0 +1,13 @@
+# Build artifacts
+/dist/
+
+# Terraform
+terraform/.terraform/
+terraform/*.tfstate
+terraform/*.tfstate.*
+terraform/terraform.tfvars
+terraform/*.tfplan
+terraform/tfplan
+terraform/apply.log
+
+# Note: terraform/.terraform.lock.hcl IS committed (reproducible provider versions).
