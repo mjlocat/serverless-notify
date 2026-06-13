@@ -48,7 +48,7 @@ type PagedMessages struct {
 // id order and Since/Next form the cursor to the next (older) page.
 type Paging struct {
 	Next  string `json:"next,omitempty"`
-	Since int64  `json:"since,omitempty"`
+	Since int64  `json:"since"`
 	Size  int    `json:"size"`
 	Limit int    `json:"limit"`
 }

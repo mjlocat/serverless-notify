@@ -5,15 +5,21 @@
 package main
 
 import (
+	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"log"
 	"mime"
 	"mime/multipart"
+	"net/http"
 	"net/url"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -25,6 +31,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/apigatewaymanagementapi"
 	apitypes "github.com/aws/aws-sdk-go-v2/service/apigatewaymanagementapi/types"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/ssm"
 
 	"github.com/mjlocat/serverless-notify/internal/auth"
@@ -43,11 +50,13 @@ type credentials struct {
 }
 
 type server struct {
-	store      *store.Store
-	wsAPI      *apigatewaymanagementapi.Client
-	creds      credentials
-	baseURL    string
-	corsOrigin string
+	store       *store.Store
+	wsAPI       *apigatewaymanagementapi.Client
+	s3          *s3.Client
+	imageBucket string
+	creds       credentials
+	baseURL     string
+	corsOrigin  string
 }
 
 func main() {
@@ -81,11 +90,13 @@ func main() {
 	}
 
 	s := &server{
-		store:      st,
-		wsAPI:      wsAPI,
-		creds:      creds,
-		baseURL:    strings.TrimRight(os.Getenv("BASE_URL"), "/"),
-		corsOrigin: os.Getenv("CORS_ALLOWED_ORIGIN"),
+		store:       st,
+		wsAPI:       wsAPI,
+		s3:          s3.NewFromConfig(cfg),
+		imageBucket: os.Getenv("IMAGE_BUCKET"),
+		creds:       creds,
+		baseURL:     strings.TrimRight(os.Getenv("BASE_URL"), "/"),
+		corsOrigin:  os.Getenv("CORS_ALLOWED_ORIGIN"),
 	}
 	lambda.Start(s.handle)
 }
@@ -358,8 +369,12 @@ func (s *server) deleteApplication(ctx context.Context, req events.APIGatewayV2H
 	return s.resp(200, nil), nil
 }
 
-// uploadAppImage is a minimal stub: app icons are optional for the Android app
-// (it falls back to a placeholder). It acknowledges the upload without storing.
+// uploadAppImage handles POST /application/{id}/image: it accepts a multipart
+// "file" upload (the field name the Gotify app and server use), stores it in the
+// images S3 bucket under image/, and points the application's Image at the new
+// object. CloudFront serves image/* from that bucket, so the Android app renders
+// the icon from the same host. Replacing an icon leaves the previous object
+// orphaned; pruning is left to the bucket's lifecycle config.
 func (s *server) uploadAppImage(ctx context.Context, req events.APIGatewayV2HTTPRequest, idStr string) (events.APIGatewayV2HTTPResponse, error) {
 	if !s.authClient(ctx, req) {
 		return s.unauthorized(), nil
@@ -375,7 +390,89 @@ func (s *server) uploadAppImage(ctx context.Context, req events.APIGatewayV2HTTP
 	if !found {
 		return s.error(404, "Not Found", "application does not exist"), nil
 	}
+	if s.imageBucket == "" {
+		return s.error(500, "Internal Server Error", "image storage is not configured"), nil
+	}
+	data, filename, err := readUpload(req)
+	if err != nil {
+		return s.error(400, "Bad Request", err.Error()), nil
+	}
+	contentType := http.DetectContentType(data)
+	if !strings.HasPrefix(contentType, "image/") {
+		return s.error(400, "Bad Request", "uploaded file is not an image"), nil
+	}
+	key := "image/" + strconv.FormatInt(id, 10) + "-" + randHex(8) + extFor(contentType, filename)
+	if _, err := s.s3.PutObject(ctx, &s3.PutObjectInput{
+		Bucket:      &s.imageBucket,
+		Key:         &key,
+		Body:        bytes.NewReader(data),
+		ContentType: &contentType,
+	}); err != nil {
+		return s.serverError(err), nil
+	}
+	app.Image = key
+	if err := s.store.PutApplication(ctx, app); err != nil {
+		return s.serverError(err), nil
+	}
 	return s.json(200, app), nil
+}
+
+// readUpload extracts the bytes of the multipart "file" field from an image
+// upload request.
+func readUpload(req events.APIGatewayV2HTTPRequest) (data []byte, filename string, err error) {
+	ct := req.Headers["content-type"]
+	if !strings.HasPrefix(ct, "multipart/form-data") {
+		return nil, "", errors.New("expected a multipart/form-data upload")
+	}
+	_, params, err := mime.ParseMediaType(ct)
+	if err != nil {
+		return nil, "", err
+	}
+	form, err := multipart.NewReader(strings.NewReader(decodeBody(req)), params["boundary"]).ReadForm(8 << 20)
+	if err != nil {
+		return nil, "", err
+	}
+	defer form.RemoveAll()
+	files := form.File["file"]
+	if len(files) == 0 {
+		return nil, "", errors.New("missing 'file' upload field")
+	}
+	f, err := files[0].Open()
+	if err != nil {
+		return nil, "", err
+	}
+	defer f.Close()
+	data, err = io.ReadAll(f)
+	return data, files[0].Filename, err
+}
+
+// extFor picks a file extension from the sniffed content type, falling back to
+// the uploaded filename's extension and finally ".png".
+func extFor(contentType, filename string) string {
+	switch contentType {
+	case "image/png":
+		return ".png"
+	case "image/jpeg":
+		return ".jpg"
+	case "image/gif":
+		return ".gif"
+	case "image/webp":
+		return ".webp"
+	}
+	if ext := filepath.Ext(filename); ext != "" {
+		return ext
+	}
+	return ".png"
+}
+
+// randHex returns n random bytes hex-encoded, used to make icon object keys
+// unique so a replaced icon isn't masked by CDN caching of the old one.
+func randHex(n int) string {
+	b := make([]byte, n)
+	if _, err := rand.Read(b); err != nil {
+		panic(err) // crypto/rand failure is unrecoverable
+	}
+	return hex.EncodeToString(b)
 }
 
 // --- client handlers -----------------------------------------------------

@@ -76,6 +76,28 @@ terraform apply            # CloudFront + ACM validation takes a few minutes
    configured username/password. The app registers its own client (`C…`) token and
    connects the stream.
 
+## Application icons
+
+New applications start with the shared default icon (`static/defaultapp.png`, uploaded by
+Terraform). To give an application its own icon, `POST` an image as multipart `file` to
+`/application/{id}/image` (the same call the Android app's icon picker makes):
+
+```bash
+curl -u "$USER:$PASS" -X POST \
+  https://notify.example.com/application/2/image \
+  -F "file=@myicon.png"
+# → returns the application with image set to "image/2-<random>.png"
+```
+
+The icon is stored in the private images S3 bucket and served via CloudFront at
+`/image/*`; the Android app picks up the new icon on its next application refresh.
+PNG, JPEG, GIF, and WebP are accepted (max 8 MB). Replacing an icon leaves the previous
+object in the bucket — add an S3 lifecycle rule if you want them pruned.
+
+> In Postman: choose **Body → form-data**, set the key to `file`, switch its type from
+> *Text* to *File*, and select the image. Don't set `Content-Type` manually — let Postman
+> add the multipart boundary.
+
 ## Verification
 
 ```bash

@@ -39,3 +39,13 @@ resource "aws_s3_bucket_policy" "images" {
   bucket = aws_s3_bucket.images.id
   policy = data.aws_iam_policy_document.images.json
 }
+
+# The fallback icon every application gets at creation (image = static/defaultapp.png).
+# Without this object the app's icon request 403s against the locked-down bucket.
+resource "aws_s3_object" "default_app_icon" {
+  bucket       = aws_s3_bucket.images.id
+  key          = "static/defaultapp.png"
+  source       = "${path.module}/assets/defaultapp.png"
+  source_hash  = filemd5("${path.module}/assets/defaultapp.png")
+  content_type = "image/png"
+}
