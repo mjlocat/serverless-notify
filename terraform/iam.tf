@@ -54,6 +54,13 @@ data "aws_iam_policy_document" "lambda" {
     actions   = ["execute-api:ManageConnections"]
     resources = ["${aws_apigatewayv2_api.ws.execution_arn}/*"]
   }
+
+  # Store uploaded application icons (POST /application/{id}/image).
+  statement {
+    sid       = "WriteImages"
+    actions   = ["s3:PutObject"]
+    resources = ["${aws_s3_bucket.images.arn}/image/*"]
+  }
 }
 
 resource "aws_iam_role_policy" "lambda" {

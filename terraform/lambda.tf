@@ -33,6 +33,7 @@ resource "aws_lambda_function" "api" {
       SSM_AUTH_PARAM      = aws_ssm_parameter.auth.name
       MESSAGE_TTL_DAYS    = tostring(var.message_ttl_days)
       CORS_ALLOWED_ORIGIN = var.cors_allowed_origin
+      IMAGE_BUCKET        = aws_s3_bucket.images.bucket
     }
   }
 }
